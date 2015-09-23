@@ -35,6 +35,21 @@
  * Author: Adam Dunkels <adam@sics.se>
  *
  */
+/*
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #ifndef LWIP_HDR_OPT_H
 #define LWIP_HDR_OPT_H
 
@@ -2660,6 +2675,20 @@
  */
 #ifndef LWIP_IPV6_DHCP6
 #define LWIP_IPV6_DHCP6                 0
+#endif
+
+/**
+ * LWIP_IPV6_ROUTE_TABLE_SUPPORT==1: Enable support for adding static routes and referring to these during forwarding.
+ */
+#ifndef LWIP_IPV6_ROUTE_TABLE_SUPPORT
+#define LWIP_IPV6_ROUTE_TABLE_SUPPORT   0
+#endif
+
+/**
+ * LWIP_IPV6_NUM_ROUTES: Number of IPV6 routes that can be kept in the static route table.
+ */
+#ifndef LWIP_IPV6_NUM_ROUTE_ENTRIES
+#define LWIP_IPV6_NUM_ROUTE_ENTRIES     8
 #endif
 
 /*

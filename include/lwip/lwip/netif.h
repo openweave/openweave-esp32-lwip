@@ -29,6 +29,21 @@
  * Author: Adam Dunkels <adam@sics.se>
  *
  */
+/*
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #ifndef LWIP_HDR_NETIF_H
 #define LWIP_HDR_NETIF_H
 
@@ -436,6 +451,11 @@ void netif_poll_all(void);
 s8_t netif_get_ip6_addr_match(struct netif *netif, const ip6_addr_t *ip6addr);
 void netif_create_ip6_linklocal_address(struct netif *netif, u8_t from_mac_48bit);
 err_t netif_add_ip6_address(struct netif *netif, const ip6_addr_t *ip6addr, s8_t *chosen_idx);
+err_t netif_remove_ip6_address(struct netif *netif, ip6_addr_t *ip6addr);
+err_t netif_add_ip6_address_with_route(struct netif *netif, ip6_addr_t *ip6addr,
+                                       u8_t prefix_len, s8_t *chosen_idx);
+err_t netif_remove_ip6_address_with_route(struct netif *netif, ip6_addr_t *ip6addr,
+                                          u8_t prefix_len);
 #endif /* LWIP_IPV6 */
 
 #if LWIP_NETIF_HWADDRHINT
