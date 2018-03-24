@@ -40,6 +40,21 @@
  * Please coordinate changes and requests with Ivan Delamer
  * <delamer@inicotech.com>
  */
+/*
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "lwip/opt.h"
 
@@ -672,7 +687,12 @@ nd6_tmr(void)
           (!neighbor_cache[i].isrouter)) {
         /* Retries exceeded. */
         nd6_free_neighbor_cache_entry(i);
-      } else {
+      }
+      else if (neighbor_cache[i].counter.probes_sent == 0) {
+        /* the first NS has already been sent when the 'INCOMPLETE' neighbor entry is created */
+        neighbor_cache[i].counter.probes_sent++;
+      }
+      else {
         /* Send a NS for this entry. */
         neighbor_cache[i].counter.probes_sent++;
         nd6_send_ns(neighbor_cache[i].netif, &(neighbor_cache[i].next_hop_address), ND6_SEND_FLAG_MULTICAST_DEST);
@@ -1408,6 +1428,7 @@ nd6_new_router(const ip6_addr_t * router_addr, struct netif * netif)
     neighbor_cache[neighbor_index].q = NULL;
     neighbor_cache[neighbor_index].state = ND6_INCOMPLETE;
     neighbor_cache[neighbor_index].counter.probes_sent = 0;
+    nd6_send_ns(neighbor_cache[neighbor_index].netif, &(neighbor_cache[neighbor_index].next_hop_address), ND6_SEND_FLAG_MULTICAST_DEST);
   }
 
   /* Mark neighbor as router. */
@@ -1592,6 +1613,7 @@ nd6_get_next_hop_entry(const ip6_addr_t * ip6addr, struct netif * netif)
       neighbor_cache[i].netif = netif;
       neighbor_cache[i].state = ND6_INCOMPLETE;
       neighbor_cache[i].counter.probes_sent = 0;
+      nd6_send_ns(neighbor_cache[i].netif, &(neighbor_cache[i].next_hop_address), ND6_SEND_FLAG_MULTICAST_DEST);
     }
   }
 
