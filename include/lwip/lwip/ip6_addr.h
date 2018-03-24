@@ -177,7 +177,7 @@ Little-endian version, stored in network order (no htonl). */
                                     ((addr1)->addr[2] == (addr2)->addr[2]) && \
                                     ((addr1)->addr[3] == (addr2)->addr[3]))
 
-#define ip6_get_subnet_id(ip6addr)   (htonl((ip6addr)->addr[2]) & 0x0000ffffUL)
+#define ip6_get_subnet_id(ip6addr)   (htonl((ip6addr)->addr[1]) & 0x0000ffffUL)
 
 #define ip6_addr_isany_val(ip6addr) (((ip6addr).addr[0] == 0) && \
                                      ((ip6addr).addr[1] == 0) && \
