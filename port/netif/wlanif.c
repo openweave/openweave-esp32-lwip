@@ -35,6 +35,21 @@
  * Author: Adam Dunkels <adam@sics.se>
  *
  */
+/*
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "lwip/opt.h"
 
@@ -152,7 +167,7 @@ wlanif_input(struct netif *netif, void *buffer, u16_t len, void* eb)
   }
 
 #if (ESP_L2_TO_L3_COPY == 1)
-  p = pbuf_alloc(PBUF_RAW, len, PBUF_RAM);
+  p = pbuf_alloc(PBUF_RAW, len, ESP_L2_TO_L3_COPY_BUF_TYPE);
   if (p == NULL) {
     ESP_STATS_DROP_INC(esp.wlanif_input_pbuf_fail);
     esp_wifi_internal_free_rx_buffer(eb);
