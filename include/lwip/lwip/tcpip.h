@@ -29,6 +29,21 @@
  * Author: Adam Dunkels <adam@sics.se>
  *
  */
+/*
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #ifndef LWIP_HDR_TCPIP_H
 #define LWIP_HDR_TCPIP_H
 
@@ -75,6 +90,13 @@ err_t  mem_free_callback(void *m);
 err_t  tcpip_timeout(u32_t msecs, sys_timeout_handler h, void *arg);
 err_t  tcpip_untimeout(sys_timeout_handler h, void *arg);
 #endif /* LWIP_TCPIP_TIMEOUT */
+
+#if LWIP_CUSTOM_CORE_LOCKING
+extern void lock_lwip_core();
+extern void unlock_lwip_core();
+#define LOCK_TCPIP_CORE()     lock_lwip_core()
+#define UNLOCK_TCPIP_CORE()   unlock_lwip_core()
+#endif /* LWIP_CUSTOME_CORE_LOCKING */
 
 #ifdef __cplusplus
 }

@@ -29,6 +29,21 @@
  * Author: Adam Dunkels <adam@sics.se>
  *
  */
+/*
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #ifndef LWIP_HDR_TCPIP_PRIV_H
 #define LWIP_HDR_TCPIP_PRIV_H
 
@@ -53,6 +68,7 @@ struct netif;
 #define LWIP_TCPIP_THREAD_ALIVE()
 #endif
 
+#if !LWIP_CUSTOM_CORE_LOCKING
 #if LWIP_TCPIP_CORE_LOCKING
 /** The global semaphore to lock the stack. */
 extern sys_mutex_t lock_tcpip_core;
@@ -62,6 +78,7 @@ extern sys_mutex_t lock_tcpip_core;
 #define LOCK_TCPIP_CORE()
 #define UNLOCK_TCPIP_CORE()
 #endif /* LWIP_TCPIP_CORE_LOCKING */
+#endif /* LWIP_CUSTOME_CORE_LOCKING */
 
 #if LWIP_MPU_COMPATIBLE
 #define API_VAR_REF(name)               (*(name))
