@@ -1,0 +1,844 @@
+From bcdc59798e85d82c893b9bb457a5addb8bebe0b1 Mon Sep 17 00:00:00 2001
+From: Jay Logue <jaylogue@google.com>
+Date: Wed, 23 Sep 2015 15:00:54 -0700
+Subject: [PATCH 8/9] openweave-esp32-lwip-patch-0008 : Static route table
+ management in LwIP.
+
+Added support for creating and managing IPv6 static routes in LwIP.  This gives applications the
+ability to configure additional IPv6 routes (and corresponding gateways) beyond those discovered
+via IPv6 router advertisements.  The change also introduces the ability to assign an IPv6 address
+to an interface with a prefix length that is less than or greater than /64 (e.g. /48 or /128).
+
+This change squashes the following commits from tps/lwip:nest/stable:
+
+    1bcf5288ce15cd9f9ba66212dca6082f558f5744 Static route table management in LwIP
+    0d81f966acd45499a55f50df37add7980fa150dc Fix for build breakage
+    050faa22689a53b874a73a5d2420d9a95034dc79 Replace entry if a prefix match is found
+    8a30aa1b561bc1ef3cfb69547bda39aa6a6804e6 Added function to return the head of the route table
+    c193a852cd7dfcc60a852e60448dcd2d1901c2eb Compare prefix length and address(upto prefix length) separately for adding to route table
+    6c75b0a1dbb8cfef73fbdf8fc9732867e96b5962 fix issues resulting in failures when trying to remove an IPv6 route from the route table.
+---
+ core/ipv6/ethip6.c                  |  35 +++++
+ core/ipv6/ip6.c                     |  35 ++++-
+ core/ipv6/ip6_route_table.c         | 267 ++++++++++++++++++++++++++++++++++++
+ core/netif.c                        | 134 ++++++++++++++++++
+ include/lwip/lwip/ip6_route_table.h | 105 ++++++++++++++
+ include/lwip/lwip/netif.h           |  20 +++
+ include/lwip/lwip/opt.h             |  29 ++++
+ include/lwip/port/lwipopts.h        |   5 +
+ 8 files changed, 629 insertions(+), 1 deletion(-)
+ create mode 100644 core/ipv6/ip6_route_table.c
+ create mode 100644 include/lwip/lwip/ip6_route_table.h
+
+diff --git a/core/ipv6/ethip6.c b/core/ipv6/ethip6.c
+index 36aa952..c68a54c 100755
+--- a/core/ipv6/ethip6.c
++++ b/core/ipv6/ethip6.c
+@@ -38,6 +38,21 @@
+  * Please coordinate changes and requests with Ivan Delamer
+  * <delamer@inicotech.com>
+  */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
+ 
+ #include "lwip/opt.h"
+ 
+@@ -51,6 +66,9 @@
+ #include "lwip/inet_chksum.h"
+ #include "lwip/netif.h"
+ #include "lwip/icmp6.h"
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++#include "lwip/ip6_route_table.h"
++#endif
+ #include "netif/ethernet.h"
+ 
+ #include <string.h>
+@@ -103,6 +121,9 @@ ethip6_output(struct netif *netif, struct pbuf *q, const ip6_addr_t *ip6addr)
+ {
+   struct eth_addr dest;
+   s8_t i;
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++  ip6_addr_t *gateway = NULL;
++#endif
+ 
+   /* make room for Ethernet header - should not fail */
+   if (pbuf_header(q, sizeof(struct eth_hdr)) != 0) {
+@@ -128,6 +149,20 @@ ethip6_output(struct netif *netif, struct pbuf *q, const ip6_addr_t *ip6addr)
+ 
+   /* We have a unicast destination IP address */
+   /* TODO anycast? */
++
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++  /* See if a gateway is present for the destination address in the static route table */
++#ifdef LWIP_HOOK_ETHIP6_GET_GW
++  gateway = LWIP_HOOK_ETHIP6_GET_GW(netif, ip6addr);
++#endif
++  if (gateway != NULL) {
++    /* Replace the destination with the gateway. The gateway is
++     * assumed to be on-link.
++     */
++    ip6addr = gateway;
++  }
++#endif
++
+   /* Get next hop record. */
+   i = nd6_get_next_hop_entry(ip6addr, netif);
+   if (i < 0) {
+diff --git a/core/ipv6/ip6.c b/core/ipv6/ip6.c
+index 6bb5408..61dd5c5 100755
+--- a/core/ipv6/ip6.c
++++ b/core/ipv6/ip6.c
+@@ -74,6 +74,10 @@
+ #include "lwip/debug.h"
+ #include "lwip/stats.h"
+ 
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++#include "lwip/ip6_route_table.h"
++#endif
++
+ /**
+  * Finds the appropriate network interface for a given IPv6 address. It tries to select
+  * a netif following a sequence of heuristics:
+@@ -81,9 +85,16 @@
+  * 2) if the destination is a link-local address, try to match the src address to a netif.
+  *    this is a tricky case because with multiple netifs, link-local addresses only have
+  *    meaning within a particular subnet/link.
++ * #if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++ * 3) tries to find a netif with a configured address matching the destination or look up
++ *    a route table for potential matching routes.
++ * #else
+  * 3) tries to match the destination subnet to a configured address
++ * #endif
+  * 4) tries to find a router
++ * #if !LWIP_IPV6_ROUTE_TABLE_SUPPORT
+  * 5) tries to match the source address to the netif
++ * #endif
+  * 6) returns the default netif, if configured
+  *
+  * @param src the source IPv6 address, if known
+@@ -93,7 +104,7 @@
+ struct netif *
+ ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
+ {
+-  struct netif *netif;
++  struct netif *netif = NULL;
+   s8_t i;
+ 
+   /* If single netif configuration, fast return. */
+@@ -142,6 +153,25 @@ ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
+   }
+ #endif
+ 
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++  /* Loop through the netif list to find a matching address */
++  for (netif = netif_list; netif != NULL; netif = netif->next) {
++    for (i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++) {
++      if (ip6_addr_isvalid(netif_ip6_addr_state(netif, i)) &&
++          ip6_addr_cmp(dest, netif_ip6_addr(netif, i))) {
++      /* Configured address on netif matches destination address */
++      return netif;
++      }
++    }
++  }
++
++  /* Lookup route table */
++  if ((netif = ip6_static_route(src, dest)) != NULL)
++  {
++    return netif;
++  }
++
++#else /* else LWIP_IPV6_ROUTE_TABLE_SUPPORT */
+   /* See if the destination subnet matches a configured address. */
+   for (netif = netif_list; netif != NULL; netif = netif->next) {
+     if (!netif_is_up(netif) || !netif_is_link_up(netif)) {
+@@ -154,6 +184,7 @@ ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
+       }
+     }
+   }
++#endif /* LWIP_IPV6_ROUTE_TABLE_SUPPORT */
+ 
+   /* Get the netif for a suitable router. */
+   i = nd6_select_router(dest, NULL);
+@@ -167,6 +198,7 @@ ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
+     }
+   }
+ 
++#if !LWIP_IPV6_ROUTE_TABLE_SUPPORT
+   /* try with the netif that matches the source address. */
+   if (!ip6_addr_isany(src)) {
+     for (netif = netif_list; netif != NULL; netif = netif->next) {
+@@ -181,6 +213,7 @@ ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
+       }
+     }
+   }
++#endif /* !LWIP_IPV6_ROUTE_TABLE_SUPPORT */
+ 
+ #if LWIP_NETIF_LOOPBACK && !LWIP_HAVE_LOOPIF
+   /* loopif is disabled, loopback traffic is passed through any netif */
+diff --git a/core/ipv6/ip6_route_table.c b/core/ipv6/ip6_route_table.c
+new file mode 100644
+index 0000000..960b43d
+--- /dev/null
++++ b/core/ipv6/ip6_route_table.c
+@@ -0,0 +1,267 @@
++/**
++ * @file
++ *
++ * IPv6 static route table.
++ */
++
++/*
++ * Copyright (c) 2015 Nest Labs, Inc.
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without modification,
++ * are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ *    this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright notice,
++ *    this list of conditions and the following disclaimer in the documentation
++ *    and/or other materials provided with the distribution.
++ * 3. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
++ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
++ * SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
++ * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
++ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
++ * OF SUCH DAMAGE.
++ *
++ * Author: Pradip De <pde@nestlabs.com>
++ *
++ *
++ * Please coordinate changes and requests with Pradip De
++ * <pde@nestlabs.com>
++ */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "lwip/opt.h"
++
++#if LWIP_IPV6  /* don't build if not configured for use in lwipopts.h */
++
++#include "lwip/def.h"
++#include "lwip/mem.h"
++#include "lwip/netif.h"
++#include "lwip/ip6.h"
++#include "lwip/ip6_route_table.h"
++#include "lwip/ip6_addr.h"
++#include "lwip/nd6.h"
++#include "lwip/debug.h"
++#include "lwip/stats.h"
++
++#include "string.h"
++
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++
++static struct ip6_route_entry static_route_table[LWIP_IPV6_NUM_ROUTE_ENTRIES];
++
++/**
++ * Add the ip6 prefix route and target netif into the static route table while
++ * keeping all entries sorted in decreasing order of prefix length.
++ * 1. Search from the last entry up to find the correct slot to insert while
++ *    moving entries one position down to create room.
++ * 2. Insert into empty slot created.
++ *
++ * Subsequently, a linear search down the list can be performed to retrieve a
++ * matching route entry for a Longest Prefix Match.
++ *
++ * @param ip6_prefix the route prefix entry to add.
++ * @param netif pointer to target netif.
++ * @param gateway the gateway address to use to send through. Has to be link local.
++ * @param index return value argument of index where route entry was added in table.
++ * @return ERR_OK  if addition was successful.
++ *         ERR_MEM if table is already full.
++ *         ERR_ARG if passed argument is bad or route already exists in table.
++ */
++err_t 
++ip6_add_route_entry(struct ip6_prefix *ip6_prefix, struct netif *netif, ip6_addr_t *gateway, s8_t *index)
++{
++  int i = -1;
++  err_t retval = ERR_OK;
++
++  if (!ip6_prefix_valid(ip6_prefix->prefix_len) || (netif == NULL)) {
++    retval = ERR_ARG;
++    goto exit;
++  }
++
++  /* Check if an entry already exists with matching prefix; If so, replace it. */
++  for (i = 0; i < LWIP_IPV6_NUM_ROUTE_ENTRIES; i++) {
++    if ((ip6_prefix->prefix_len == static_route_table[i].prefix.prefix_len) &&
++        memcmp(&ip6_prefix->addr, &static_route_table[i].prefix.addr,
++               ip6_prefix->prefix_len / 8) == 0) {
++      //Prefix matches; replace the netif with the one being added.
++      goto insert;
++    }
++  }
++
++  /* Check if the table is full */
++  if (static_route_table[LWIP_IPV6_NUM_ROUTE_ENTRIES - 1].netif != NULL) {
++    retval = ERR_MEM;
++    goto exit;
++  }
++
++  /* Shift all entries down the table until slot is found */
++  for (i = LWIP_IPV6_NUM_ROUTE_ENTRIES - 1;
++       i > 0 && (ip6_prefix->prefix_len > static_route_table[i - 1].prefix.prefix_len); i--) {
++    SMEMCPY(&static_route_table[i], &static_route_table[i - 1], sizeof(struct ip6_route_entry));
++  }
++
++insert:
++  /* Insert into the slot selected */
++  SMEMCPY(&static_route_table[i].prefix, ip6_prefix, sizeof(struct ip6_prefix));
++  static_route_table[i].netif = netif;
++ 
++  /* Add gateway to route table */
++  static_route_table[i].gateway = gateway;
++  
++  if (index != NULL) {
++    *index = i;
++  }
++
++exit:  
++  return retval;
++}
++
++/**
++ * Removes the route entry from the static route table.
++ *
++ * @param ip6_prefix the route prefix entry to delete.
++ */
++void
++ip6_remove_route_entry(struct ip6_prefix *ip6_prefix)
++{
++  int i, pos = -1;
++
++  for (i = 0; i < LWIP_IPV6_NUM_ROUTE_ENTRIES; i++) {
++    /* compare prefix to find position to delete */
++    if (ip6_prefix->prefix_len == static_route_table[i].prefix.prefix_len &&
++        memcmp(&ip6_prefix->addr, &static_route_table[i].prefix.addr,
++               ip6_prefix->prefix_len / 8) == 0) {
++      pos = i;
++      break;
++    }
++  }
++
++  if (pos >= 0) {
++    /* Shift everything beyond pos one slot up */
++    for (i = pos; i < LWIP_IPV6_NUM_ROUTE_ENTRIES - 1; i++) {
++      SMEMCPY(&static_route_table[i], &static_route_table[i+1], sizeof(struct ip6_route_entry));
++      if (static_route_table[i].netif == NULL) {
++        break;
++      }
++    }
++    /* Zero the remaining entries */
++    for (; i < LWIP_IPV6_NUM_ROUTE_ENTRIES; i++) {
++      ip6_addr_set_zero((&static_route_table[i].prefix.addr));
++      static_route_table[i].netif = NULL;
++    }
++  }
++
++  return;
++}
++
++/**
++ * Finds the appropriate route entry in the static route table corresponding to the given
++ * destination IPv6 address. Since the entries in the route table are kept sorted in decreasing
++ * order of prefix length, a linear search down the list is performed to retrieve a matching
++ * index.
++ *
++ * @param ip6_dest_addr the destination address to match
++ * @return the index of the found route entry; -1 if not found.
++ */
++s8_t 
++ip6_find_route_entry(ip6_addr_t *ip6_dest_addr)
++{
++  int i, index = -1;
++
++  /* Search prefix in the sorted(decreasing order of prefix length) list */
++  for(i = 0; i < LWIP_IPV6_NUM_ROUTE_ENTRIES; i++) {
++    if (memcmp(ip6_dest_addr, &static_route_table[i].prefix.addr,
++        static_route_table[i].prefix.prefix_len / 8) == 0) {
++      index = i;
++      break;
++    }
++  }
++
++  return index;
++}
++
++/**
++ * Finds the appropriate network interface for a given IPv6 address from a routing table with
++ * static IPv6 routes.
++ *
++ * @param src the source IPv6 address, if known
++ * @param dest the destination IPv6 address for which to find the route
++ * @return the netif on which to send to reach dest
++ */ 
++struct netif *
++ip6_static_route(ip6_addr_t *src, ip6_addr_t *dest)
++{
++
++  int i;
++  /* Perform table lookup */
++  i = ip6_find_route_entry(dest);
++  
++  if (i >= 0) {
++    return static_route_table[i].netif;
++  }
++  else {
++    return NULL;
++  }
++}
++
++/**
++ * Finds the gateway IP6 address for a given destination IPv6 address and target netif
++ * from a routing table with static IPv6 routes.
++ *
++ * @param netif the netif used for sending
++ * @param dest the destination IPv6 address
++ * @return the ip6 address of the gateway to forward packet to
++ */ 
++ip6_addr_t *
++ip6_get_gateway(struct netif *netif, ip6_addr_t *dest)
++{
++  ip6_addr_t *ret_gw = NULL;
++  const int i = ip6_find_route_entry(dest);
++  
++  if (i >= 0) {
++    if (static_route_table[i].gateway != NULL) {
++      ret_gw = static_route_table[i].gateway;
++    }
++  }
++
++  return ret_gw;
++}
++
++/**
++ * Returns the top of the route table.
++ * This should be used for debug printing only.
++ *
++ * @return the top of the route table.
++ */
++struct ip6_route_entry *
++ip6_get_route_table(void)
++{
++    return static_route_table;
++}
++
++#endif /* LWIP_IPV6_ROUTE_TABLE_SUPPORT */
++
++#endif /* LWIP_IPV6 */
+diff --git a/core/netif.c b/core/netif.c
+index 2b25143..5feb8ac 100755
+--- a/core/netif.c
++++ b/core/netif.c
+@@ -35,6 +35,21 @@
+  * Author: Adam Dunkels <adam@sics.se>
+  *
+  */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
+ 
+ #include "lwip/opt.h"
+ 
+@@ -69,6 +84,10 @@
+ #include "lwip/mld6.h"
+ #endif /* LWIP_IPV6_MLD */
+ 
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++#include "lwip/ip6_route_table.h"
++#endif /* LWIP_IPV6_ROUTE_TABLE_SUPPORT */
++
+ #if LWIP_NETIF_STATUS_CALLBACK
+ #define NETIF_STATUS_CALLBACK(n) do{ if (n->status_callback) { (n->status_callback)(n); }}while(0)
+ #else
+@@ -997,6 +1016,99 @@ netif_create_ip6_linklocal_address(struct netif *netif, u8_t from_mac_48bit)
+ #endif /* LWIP_IPV6_AUTOCONFIG */
+ }
+ 
++/**
++ * This function allows for the addition of a new IPv6 address to an interface
++ * along with a prefix len to add a route to the routing table.
++ *
++ * @param netif netif to add the address on
++ * @param ip6addr address to add
++ * @prefix_len the prefix length for the route corresponding to the address
++ * @param chosen_idx if != NULL, the chosen IPv6 address index will be stored here
++ */
++err_t
++netif_add_ip6_address_with_route(struct netif *netif, ip6_addr_t *ip6addr,
++                                 u8_t prefix_len, s8_t *chosen_idx)
++{
++  s8_t retval = ERR_OK;
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++  struct ip6_prefix ip6_pref;
++
++  if (!ip6_prefix_valid(prefix_len)) {
++    retval = ERR_ARG;
++    goto fail;
++  }
++#else
++  if (prefix_len != 64 && prefix_len != 128) {
++    retval = ERR_ARG;
++    goto fail;
++  }
++#endif
++
++  if ((retval = netif_add_ip6_address(netif, ip6addr, chosen_idx)) !=
++                ERR_OK) {
++    goto fail;
++  }
++
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++  /* Add a route in routing table for the prefix len. Ignore adding route if
++   * prefix_len is zero(default route) or prefix_len is 128(host route)
++   */
++  if (prefix_len > 0 && prefix_len < IP6_MAX_PREFIX_LEN) {
++    ip6_addr_copy(ip6_pref.addr, *ip6addr);
++    ip6_pref.prefix_len = prefix_len;
++    if ((retval = ip6_add_route_entry(&ip6_pref, netif, NULL, NULL)) !=
++                  ERR_OK) {
++      goto fail;
++    }
++  }
++#endif /* LWIP_IPV6_ROUTE_TABLE_SUPPORT */
++
++fail:
++  return retval;
++}
++
++/**
++ * This function allows for the removal of an IPv6 address from an interface
++ * as well as any routes associated with it.
++ *
++ * @param netif netif on which the address is assigned
++ * @param ip6addr address to remove
++ * @prefix_len the prefix length for the route corresponding to the address
++ */
++err_t
++netif_remove_ip6_address_with_route(struct netif *netif, ip6_addr_t *ip6addr,
++                                    u8_t prefix_len)
++{
++  s8_t retval = ERR_OK;
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++  struct ip6_prefix ip6_pref;
++
++  if (!ip6_prefix_valid(prefix_len)) {
++    retval = ERR_ARG;
++    goto fail;
++  }
++#else
++  if (prefix_len != 64 && prefix_len != 128) {
++    retval = ERR_ARG;
++    goto fail;
++  }
++#endif /* LWIP_IPV6_ROUTE_TABLE_SUPPORT */
++
++  if ((retval = netif_remove_ip6_address(netif, ip6addr)) != ERR_OK) {
++      goto fail;
++  }
++
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++  /* Remove the route in routing table for the prefix len */
++  ip6_addr_copy(ip6_pref.addr, *ip6addr);
++  ip6_pref.prefix_len = prefix_len;
++  ip6_remove_route_entry(&ip6_pref);
++#endif /* LWIP_IPV6_ROUTE_TABLE_SUPPORT */
++
++fail:
++  return retval;
++}
++
+ /** This function allows for the easy addition of a new IPv6 address to an interface.
+  * It takes care of finding an empty slot and then sets the address tentative
+  * (to make sure that all the subsequent processing happens).
+@@ -1037,6 +1149,28 @@ netif_add_ip6_address(struct netif *netif, const ip6_addr_t *ip6addr, s8_t *chos
+   return ERR_VAL;
+ }
+ 
++/** This function allows for the easy removal of an IPv6 address from an interface.
++ *
++ * @param netif netif on which the address is assigned
++ * @param ip6addr address to remove
++ */
++err_t
++netif_remove_ip6_address(struct netif *netif, ip6_addr_t *ip6addr)
++{
++  s8_t i;
++
++  i = netif_get_ip6_addr_match(netif, ip6addr);
++  if (i >= 0) {
++    ip6_addr_t zero;
++    ip6_addr_set_zero(&zero);
++    netif_ip6_addr_set(netif, i, &zero);
++    netif_ip6_addr_set_state(netif, i, IP6_ADDR_INVALID);
++    return ERR_OK;
++  }
++
++  return ERR_VAL;
++}
++
+ /** Dummy IPv6 output function for netifs not supporting IPv6
+  */
+ static err_t
+diff --git a/include/lwip/lwip/ip6_route_table.h b/include/lwip/lwip/ip6_route_table.h
+new file mode 100644
+index 0000000..be4655d
+--- /dev/null
++++ b/include/lwip/lwip/ip6_route_table.h
+@@ -0,0 +1,105 @@
++/**
++ * @file
++ *
++ * IPv6 static route table.
++ */
++
++/*
++ * Copyright (c) 2015 Nest Labs, Inc.
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without modification,
++ * are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ *    this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright notice,
++ *    this list of conditions and the following disclaimer in the documentation
++ *    and/or other materials provided with the distribution.
++ * 3. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
++ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
++ * SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
++ * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
++ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
++ * OF SUCH DAMAGE.
++ *
++ * Author: Pradip De <pde@nestlabs.com>
++ *
++ *
++ * Please coordinate changes and requests with Pradip De
++ * <pde@nestlabs.com>
++ */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef __LWIP_IP6_ROUTE_TABLE_H__
++#define __LWIP_IP6_ROUTE_TABLE_H__
++
++#include "lwip/opt.h"
++
++#if LWIP_IPV6  /* don't build if not configured for use in lwipopts.h */
++
++#include "lwip/ip.h"
++#include "lwip/ip6_addr.h"
++#include "lwip/def.h"
++#include "lwip/netif.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
++
++#define IP6_MAX_PREFIX_LEN                  (128)
++#define IP6_PREFIX_ALLOWED_GRANULARITY      (8)
++/* Prefix length cannot be greater than 128 bits and needs to be at a byte boundary */
++#define ip6_prefix_valid(prefix_len)        (((prefix_len) <= IP6_MAX_PREFIX_LEN) &&                 \
++                                             (((prefix_len) % IP6_PREFIX_ALLOWED_GRANULARITY) == 0))
++
++struct ip6_prefix {
++  ip6_addr_t addr;
++  u8_t prefix_len; /* prefix length in bits at byte boundaries */
++};
++
++struct ip6_route_entry {
++  struct ip6_prefix prefix;
++  struct netif *netif;
++  ip6_addr_t *gateway;
++};
++
++err_t ip6_add_route_entry(struct ip6_prefix *ip6_prefix, struct netif *netif, 
++                         ip6_addr_t *gateway, s8_t *index);
++void ip6_remove_route_entry(struct ip6_prefix *ip6_prefix);
++s8_t ip6_find_route_entry(ip6_addr_t *ip6_dest_addr);
++struct netif *ip6_static_route(ip6_addr_t *src, ip6_addr_t *dest);
++ip6_addr_t *ip6_get_gateway(struct netif *netif, ip6_addr_t *dest);
++struct ip6_route_entry *ip6_get_route_table(void);
++#endif /* LWIP_IPV6_ROUTE_TABLE_SUPPORT */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* LWIP_IPV6 */
++
++#endif /* __LWIP_IP6_ROUTE_TABLE_H__ */
+diff --git a/include/lwip/lwip/netif.h b/include/lwip/lwip/netif.h
+index bd25b82..48b003a 100755
+--- a/include/lwip/lwip/netif.h
++++ b/include/lwip/lwip/netif.h
+@@ -29,6 +29,21 @@
+  * Author: Adam Dunkels <adam@sics.se>
+  *
+  */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
+ #ifndef LWIP_HDR_NETIF_H
+ #define LWIP_HDR_NETIF_H
+ 
+@@ -436,6 +451,11 @@ void netif_poll_all(void);
+ s8_t netif_get_ip6_addr_match(struct netif *netif, const ip6_addr_t *ip6addr);
+ void netif_create_ip6_linklocal_address(struct netif *netif, u8_t from_mac_48bit);
+ err_t netif_add_ip6_address(struct netif *netif, const ip6_addr_t *ip6addr, s8_t *chosen_idx);
++err_t netif_remove_ip6_address(struct netif *netif, ip6_addr_t *ip6addr);
++err_t netif_add_ip6_address_with_route(struct netif *netif, ip6_addr_t *ip6addr,
++                                       u8_t prefix_len, s8_t *chosen_idx);
++err_t netif_remove_ip6_address_with_route(struct netif *netif, ip6_addr_t *ip6addr,
++                                          u8_t prefix_len);
+ #endif /* LWIP_IPV6 */
+ 
+ #if LWIP_NETIF_HWADDRHINT
+diff --git a/include/lwip/lwip/opt.h b/include/lwip/lwip/opt.h
+index 6ea556a..5d6a157 100755
+--- a/include/lwip/lwip/opt.h
++++ b/include/lwip/lwip/opt.h
+@@ -35,6 +35,21 @@
+  * Author: Adam Dunkels <adam@sics.se>
+  *
+  */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
+ #ifndef LWIP_HDR_OPT_H
+ #define LWIP_HDR_OPT_H
+ 
+@@ -2662,6 +2677,20 @@
+ #define LWIP_IPV6_DHCP6                 0
+ #endif
+ 
++/**
++ * LWIP_IPV6_ROUTE_TABLE_SUPPORT==1: Enable support for adding static routes and referring to these during forwarding.
++ */
++#ifndef LWIP_IPV6_ROUTE_TABLE_SUPPORT
++#define LWIP_IPV6_ROUTE_TABLE_SUPPORT   0
++#endif
++
++/**
++ * LWIP_IPV6_NUM_ROUTES: Number of IPV6 routes that can be kept in the static route table.
++ */
++#ifndef LWIP_IPV6_NUM_ROUTE_ENTRIES
++#define LWIP_IPV6_NUM_ROUTE_ENTRIES     8
++#endif
++
+ /*
+    ---------------------------------------
+    ---------- Hook options ---------------
+diff --git a/include/lwip/port/lwipopts.h b/include/lwip/port/lwipopts.h
+index 40df825..efaa46d 100644
+--- a/include/lwip/port/lwipopts.h
++++ b/include/lwip/port/lwipopts.h
+@@ -632,6 +632,11 @@
+  */
+ #define LWIP_IPV6                       1
+ 
++/**
++ * Enable IPv6 routing table support
++ */
++#define LWIP_IPV6_ROUTE_TABLE_SUPPORT 1
++
+ /*
+    ---------------------------------------
+    ---------- Hook options ---------------
+-- 
+1.9.1
+

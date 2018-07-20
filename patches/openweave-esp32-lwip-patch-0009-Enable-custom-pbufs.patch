@@ -1,0 +1,31 @@
+From 9c3d3dfe41eeeec2332c6d299f4b14c1b528d1d7 Mon Sep 17 00:00:00 2001
+From: Jay Logue <jaylogue@google.com>
+Date: Fri, 18 May 2018 16:12:55 -0700
+Subject: [PATCH 9/9] openweave-esp32-lwip-patch-0009 : Enable custom pbufs
+
+Enabled support for LwIP's custom pbufs, which are required for certain Weave
+functionality.
+---
+ include/lwip/port/lwipopts.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/include/lwip/port/lwipopts.h b/include/lwip/port/lwipopts.h
+index efaa46d..94b0802 100644
+--- a/include/lwip/port/lwipopts.h
++++ b/include/lwip/port/lwipopts.h
+@@ -360,6 +360,12 @@
+    ----------------------------------
+ */
+ 
++/**
++ * Enable support for custom PBUFs.
++ */
++#define LWIP_SUPPORT_CUSTOM_PBUF 1
++
++
+ /*
+    ------------------------------------------------
+    ---------- Network Interfaces options ----------
+-- 
+1.9.1
+

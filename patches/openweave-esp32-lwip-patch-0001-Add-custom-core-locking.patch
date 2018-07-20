@@ -1,0 +1,169 @@
+From 1754d83f149b0e17fb5e740dc0ba55e3bbe1080e Mon Sep 17 00:00:00 2001
+From: Jay Logue <jaylogue@google.com>
+Date: Fri, 18 May 2018 10:48:05 -0700
+Subject: [PATCH 1/9] openweave-esp32-lwip-patch-0001 : Add custom core locking
+
+Added ability for the host environment to define locking functions that
+protect entry to the LwIP stack by the LwIP tcpip thread.  This enables
+coordinated use of the LwIP "raw" APIs from multiple threads.
+
+This feature differs from LwIP's experimental TCPIP_CORE_LOCKING feature
+in that it does not alter the behavior of other LwIP APIs such as the
+netconn API.  Note that the two features cannot be used together.
+---
+ COPYING                             | 16 ++++++++++++++++
+ include/lwip/lwip/priv/tcpip_priv.h | 17 +++++++++++++++++
+ include/lwip/lwip/tcpip.h           | 22 ++++++++++++++++++++++
+ include/lwip/port/lwipopts.h        | 21 +++++++++++++++++++++
+ 4 files changed, 76 insertions(+)
+
+diff --git a/COPYING b/COPYING
+index e23898b..c80bbaa 100755
+--- a/COPYING
++++ b/COPYING
+@@ -29,5 +29,21 @@
+  * Author: Adam Dunkels <adam@sics.se>
+  *
+  */
++ 
++/*
++ * Copyright 2018 Google LLC
++ * 
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ * 
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ * 
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
+ 
+ 
+diff --git a/include/lwip/lwip/priv/tcpip_priv.h b/include/lwip/lwip/priv/tcpip_priv.h
+index cc1c54e..7af487b 100755
+--- a/include/lwip/lwip/priv/tcpip_priv.h
++++ b/include/lwip/lwip/priv/tcpip_priv.h
+@@ -29,6 +29,21 @@
+  * Author: Adam Dunkels <adam@sics.se>
+  *
+  */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
+ #ifndef LWIP_HDR_TCPIP_PRIV_H
+ #define LWIP_HDR_TCPIP_PRIV_H
+ 
+@@ -53,6 +68,7 @@ struct netif;
+ #define LWIP_TCPIP_THREAD_ALIVE()
+ #endif
+ 
++#if !LWIP_CUSTOM_CORE_LOCKING
+ #if LWIP_TCPIP_CORE_LOCKING
+ /** The global semaphore to lock the stack. */
+ extern sys_mutex_t lock_tcpip_core;
+@@ -62,6 +78,7 @@ extern sys_mutex_t lock_tcpip_core;
+ #define LOCK_TCPIP_CORE()
+ #define UNLOCK_TCPIP_CORE()
+ #endif /* LWIP_TCPIP_CORE_LOCKING */
++#endif /* LWIP_CUSTOME_CORE_LOCKING */
+ 
+ #if LWIP_MPU_COMPATIBLE
+ #define API_VAR_REF(name)               (*(name))
+diff --git a/include/lwip/lwip/tcpip.h b/include/lwip/lwip/tcpip.h
+index c123586..93b1f2a 100755
+--- a/include/lwip/lwip/tcpip.h
++++ b/include/lwip/lwip/tcpip.h
+@@ -29,6 +29,21 @@
+  * Author: Adam Dunkels <adam@sics.se>
+  *
+  */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
+ #ifndef LWIP_HDR_TCPIP_H
+ #define LWIP_HDR_TCPIP_H
+ 
+@@ -76,6 +91,13 @@ err_t  tcpip_timeout(u32_t msecs, sys_timeout_handler h, void *arg);
+ err_t  tcpip_untimeout(sys_timeout_handler h, void *arg);
+ #endif /* LWIP_TCPIP_TIMEOUT */
+ 
++#if LWIP_CUSTOM_CORE_LOCKING
++extern void lock_lwip_core();
++extern void unlock_lwip_core();
++#define LOCK_TCPIP_CORE()     lock_lwip_core()
++#define UNLOCK_TCPIP_CORE()   unlock_lwip_core()
++#endif /* LWIP_CUSTOME_CORE_LOCKING */
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/lwip/port/lwipopts.h b/include/lwip/port/lwipopts.h
+index 4652c6d..b588a94 100644
+--- a/include/lwip/port/lwipopts.h
++++ b/include/lwip/port/lwipopts.h
+@@ -29,6 +29,21 @@
+  * Author: Simon Goldschmidt
+  *
+  */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
+ #ifndef __LWIPOPTS_H__
+ #define __LWIPOPTS_H__
+ 
+@@ -478,6 +493,12 @@
+  */
+ #define LWIP_TCPIP_CORE_LOCKING         0
+ 
++/**
++ * Enable custom core locking functions necessary for correct operation of Weave
++ * Inet Layer.
++ */
++#define LWIP_CUSTOM_CORE_LOCKING 1
++
+ /*
+    ------------------------------------
+    ---------- Socket options ----------
+-- 
+1.9.1
+
