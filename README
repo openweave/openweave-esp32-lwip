@@ -1,3 +1,25 @@
+openweave-esp32-lwip
+
+openweave-esp32-lwip is version of the LwIP Lightweight TCP/IP stack enhanced
+to support Nest’s OpenWeave IoT application layer framework running on the
+Espressif ESP32.
+
+openweave-esp32-lwip is a combination of three open-source code bases: 
+
+  * the baseline LwIP stack published, by the LwIP project;
+  * patches to LwIP for the ESP32, published by Espressif Systems; and
+  * patches to LwIP to support OpenWeave, published by Nest/Google.  
+
+The Nest team has published this code in a combined form to make it easier for
+developers to build and test OpenWeave applications on the ESP32.  Despite
+this, openweave-esp32-lwip does not constitute an officially supported Google
+Product.
+
+
+-------------------------------------------------------------------------
+Original LwIP README documentation follows
+-------------------------------------------------------------------------
+
 INTRODUCTION
 
 lwIP is a small independent implementation of the TCP/IP protocol
