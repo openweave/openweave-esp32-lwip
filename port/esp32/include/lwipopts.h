@@ -686,6 +686,10 @@
  */
 #define LWIP_ND6_RDNSS_MAX_DNS_SERVERS  DNS_MAX_SERVERS
 
+/**
+ * Enable IPv6 routing table support
+ */
+#define LWIP_IPV6_ROUTE_TABLE_SUPPORT 1
 
 /*
    ---------------------------------------
