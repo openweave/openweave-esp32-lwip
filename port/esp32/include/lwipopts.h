@@ -396,6 +396,12 @@
    ----------------------------------
 */
 
+/**
+ * Enable support for custom PBUFs.
+ */
+#define LWIP_SUPPORT_CUSTOM_PBUF 1
+
+
 /*
    ------------------------------------------------
    ---------- Network Interfaces options ----------
