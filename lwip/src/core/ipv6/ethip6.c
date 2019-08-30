@@ -38,6 +38,21 @@
  * Please coordinate changes and requests with Ivan Delamer
  * <delamer@inicotech.com>
  */
+/*
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "lwip/opt.h"
 
@@ -52,6 +67,9 @@
 #include "lwip/netif.h"
 #include "lwip/icmp6.h"
 #include "lwip/prot/ethernet.h"
+#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
+#include "lwip/ip6_route_table.h"
+#endif
 #include "netif/ethernet.h"
 
 #include <string.h>
@@ -81,6 +99,9 @@ ethip6_output(struct netif *netif, struct pbuf *q, const ip6_addr_t *ip6addr)
   struct eth_addr dest;
   const u8_t *hwaddr;
   err_t result;
+#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
+  ip6_addr_t *gateway = NULL;
+#endif
 
   /* multicast destination IP address? */
   if (ip6_addr_ismulticast(ip6addr)) {
@@ -98,6 +119,19 @@ ethip6_output(struct netif *netif, struct pbuf *q, const ip6_addr_t *ip6addr)
 
   /* We have a unicast destination IP address */
   /* @todo anycast? */
+
+#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
+  /* See if a gateway is present for the destination address in the static route table */
+#ifdef LWIP_HOOK_ETHIP6_GET_GW
+  gateway = LWIP_HOOK_ETHIP6_GET_GW(netif, ip6addr);
+#endif
+  if (gateway != NULL) {
+    /* Replace the destination with the gateway. The gateway is
+     * assumed to be on-link.
+     */
+    ip6addr = gateway;
+  }
+#endif
 
   /* Ask ND6 what to do with the packet. */
   result = nd6_get_next_hop_addr_or_queue(netif, q, ip6addr, &hwaddr);

@@ -655,6 +655,11 @@
  */
 #define LWIP_IPV6                       1
 
+/**
+ * Enable IPv6 routing table support
+ */
+#define LWIP_IPV6_ROUTE_TABLE_SUPPORT 1
+
 /*
    ---------------------------------------
    ---------- Hook options ---------------

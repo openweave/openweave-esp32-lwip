@@ -75,6 +75,10 @@
 #include "lwip/debug.h"
 #include "lwip/stats.h"
 
+#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
+#include "lwip/ip6_route_table.h"
+#endif
+
 #ifdef LWIP_HOOK_FILENAME
 #include LWIP_HOOK_FILENAME
 #endif
@@ -86,9 +90,16 @@
  * 2) if the destination is a link-local address, try to match the src address to a netif.
  *    this is a tricky case because with multiple netifs, link-local addresses only have
  *    meaning within a particular subnet/link.
+ * #if LWIP_IPV6_ROUTE_TABLE_SUPPORT
+ * 3) tries to find a netif with a configured address matching the destination or look up
+ *    a route table for potential matching routes.
+ * #else
  * 3) tries to match the destination subnet to a configured address
+ * #endif
  * 4) tries to find a router
+ * #if !LWIP_IPV6_ROUTE_TABLE_SUPPORT
  * 5) tries to match the source address to the netif
+ * #endif
  * 6) returns the default netif, if configured
  *
  * @param src the source IPv6 address, if known
@@ -98,7 +109,7 @@
 struct netif *
 ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
 {
-  struct netif *netif;
+  struct netif *netif = NULL;
   s8_t i;
 
   /* If single netif configuration, fast return. */
@@ -149,6 +160,25 @@ ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
   }
 #endif
 
+#if LWIP_IPV6_ROUTE_TABLE_SUPPORT
+  /* Loop through the netif list to find a matching address */
+  for (netif = netif_list; netif != NULL; netif = netif->next) {
+    for (i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++) {
+      if (ip6_addr_isvalid(netif_ip6_addr_state(netif, i)) &&
+          ip6_addr_cmp(dest, netif_ip6_addr(netif, i))) {
+      /* Configured address on netif matches destination address */
+      return netif;
+      }
+    }
+  }
+
+  /* Lookup route table */
+  if ((netif = ip6_static_route(src, dest)) != NULL)
+  {
+    return netif;
+  }
+
+#else /* else LWIP_IPV6_ROUTE_TABLE_SUPPORT */
   /* See if the destination subnet matches a configured address. */
   for (netif = netif_list; netif != NULL; netif = netif->next) {
     if (!netif_is_up(netif) || !netif_is_link_up(netif)) {
@@ -161,6 +191,7 @@ ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
       }
     }
   }
+#endif /* LWIP_IPV6_ROUTE_TABLE_SUPPORT */
 
   /* Get the netif for a suitable router. */
   netif = nd6_find_route(dest);
@@ -168,6 +199,7 @@ ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
     return netif;
   }
 
+#if !LWIP_IPV6_ROUTE_TABLE_SUPPORT
   /* try with the netif that matches the source address. */
   if (!ip6_addr_isany(src)) {
     for (netif = netif_list; netif != NULL; netif = netif->next) {
@@ -182,6 +214,7 @@ ip6_route(const ip6_addr_t *src, const ip6_addr_t *dest)
       }
     }
   }
+#endif /* !LWIP_IPV6_ROUTE_TABLE_SUPPORT */
 
 #if LWIP_NETIF_LOOPBACK && !LWIP_HAVE_LOOPIF
   /* loopif is disabled, loopback traffic is passed through any netif */
