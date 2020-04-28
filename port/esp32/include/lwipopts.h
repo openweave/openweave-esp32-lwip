@@ -1,8 +1,8 @@
 /*
  * Copyright (c) 2001-2003 Swedish Institute of Computer Science.
- * All rights reserved. 
- * 
- * Redistribution and use in source and binary forms, with or without modification, 
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
  * are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
@@ -11,21 +11,21 @@
  *    this list of conditions and the following disclaimer in the documentation
  *    and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission. 
+ *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED 
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF 
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT 
- * SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, 
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT 
- * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING 
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY 
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+ * SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+ * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  *
  * This file is part of the lwIP TCP/IP stack.
- * 
+ *
  * Author: Simon Goldschmidt
  *
  */
@@ -43,7 +43,7 @@
 #include "esp_task.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
-
+#include "sntp.h"
 #include "netif/dhcp_state.h"
 
 /* Enable all Espressif-only options */
@@ -316,7 +316,7 @@
  * scenario happens: 192.168.0.2 -> 0.0.0.0 -> 192.168.0.2 or 192.168.0.2 -> 0.0.0.0
  */
 
-#define ESP_TCP_KEEP_CONNECTION_WHEN_IP_CHANGES  CONFIG_ESP_TCP_KEEP_CONNECTION_WHEN_IP_CHANGES 
+#define ESP_TCP_KEEP_CONNECTION_WHEN_IP_CHANGES  CONFIG_ESP_TCP_KEEP_CONNECTION_WHEN_IP_CHANGES
 /*
  *     LWIP_EVENT_API==1: The user defines lwip_tcp_event() to receive all
  *         events (accept, sent, etc) that happen in the system.
@@ -361,6 +361,19 @@
 #endif
 #ifndef TCP_OVERSIZE
 #error "One of CONFIG_TCP_OVERSIZE_xxx options should be set by sdkconfig"
+#endif
+
+/**
+ * LWIP_WND_SCALE and TCP_RCV_SCALE:
+ * Set LWIP_WND_SCALE to 1 to enable window scaling.
+ * Set TCP_RCV_SCALE to the desired scaling factor (shift count in the
+ * range of [0..14]).
+ * When LWIP_WND_SCALE is enabled but TCP_RCV_SCALE is 0, we can use a large
+ * send window while having a small receive window only.
+ */
+#ifdef CONFIG_LWIP_WND_SCALE
+#define LWIP_WND_SCALE                  1
+#define TCP_RCV_SCALE                   CONFIG_TCP_RCV_SCALE
 #endif
 
 /*
@@ -513,6 +526,13 @@
 #define LWIP_SO_SNDTIMEO                1
 
 /**
+ * LWIP_RANDOMIZE_INITIAL_LOCAL_PORTS==1: randomize the local port for the first
+ * local TCP/UDP pcb (default==0). This can prevent creating predictable port
+ * numbers after booting a device.
+ */
+#define LWIP_RANDOMIZE_INITIAL_LOCAL_PORTS   CONFIG_LWIP_RANDOMIZE_INITIAL_LOCAL_PORTS
+
+/**
  * LWIP_SO_RCVTIMEO==1: Enable receive timeout for sockets/netconns and
  * SO_RCVTIMEO processing.
  */
@@ -577,6 +597,11 @@
 #if PPP_SUPPORT
 
 /**
+ * PPP_NOTIFY_PHASE==1: Support PPP notify phase.
+ */
+#define PPP_NOTIFY_PHASE                CONFIG_PPP_NOTIFY_PHASE_SUPPORT
+
+/**
  * PAP_SUPPORT==1: Support PAP.
  */
 #define PAP_SUPPORT                     CONFIG_PPP_PAP_SUPPORT
@@ -634,6 +659,13 @@
  * LWIP_IPV6==1: Enable IPv6
  */
 #define LWIP_IPV6                       1
+
+/**
+ * LWIP_ND6_RDNSS_MAX_DNS_SERVERS: Allow IPv6 DNS servers to be retrieved from
+ * NDP, up to the maximum number of allowed DNS servers (minus fallback slot)
+ */
+#define LWIP_ND6_RDNSS_MAX_DNS_SERVERS  DNS_MAX_SERVERS
+
 
 /*
    ---------------------------------------
@@ -713,6 +745,17 @@
  */
 #define ETHARP_TRUST_IP_MAC             CONFIG_LWIP_ETHARP_TRUST_IP_MAC
 
+/**
+ * ETHARP_SUPPORT_VLAN==1: support receiving and sending ethernet packets with
+ * VLAN header. See the description of LWIP_HOOK_VLAN_CHECK and
+ * LWIP_HOOK_VLAN_SET hooks to check/set VLAN headers.
+ * Additionally, you can define ETHARP_VLAN_CHECK to an u16_t VLAN ID to check.
+ * If ETHARP_VLAN_CHECK is defined, only VLAN-traffic for this VLAN is accepted.
+ * If ETHARP_VLAN_CHECK is not defined, all traffic is accepted.
+ * Alternatively, define a function/define ETHARP_VLAN_CHECK_FN(eth_hdr, vlan)
+ * that returns 1 to accept a packet or 0 to drop a packet.
+ */
+#define ETHARP_SUPPORT_VLAN             CONFIG_ETHARP_SUPPORT_VLAN
 
 /**
  * POSIX I/O functions are mapped to LWIP via the VFS layer
@@ -739,9 +782,7 @@
 #define ESP_THREAD_SAFE_DEBUG           LWIP_DBG_OFF
 #define ESP_DHCP                        1
 #define ESP_DNS                         1
-#define ESP_IPV6_AUTOCONFIG             1
 #define ESP_PERF                        0
-#define ESP_RANDOM_TCP_PORT             1
 #define ESP_IP4_ATON                    1
 #define ESP_LIGHT_SLEEP                 1
 #define ESP_L2_TO_L3_COPY               CONFIG_L2_TO_L3_COPY
@@ -756,11 +797,14 @@
 #define ESP_AUTO_RECV                   1
 #define ESP_GRATUITOUS_ARP              CONFIG_ESP_GRATUITOUS_ARP
 
-#if CONFIG_LWIP_IRAM_OPTIMIZATION
-#define ESP_IRAM_ATTR                   IRAM_ATTR
-#else
-#define ESP_IRAM_ATTR                   
+#ifdef CONFIG_LWIP_IPV6_AUTOCONFIG
+#define ESP_IPV6_AUTOCONFIG             CONFIG_LWIP_IPV6_AUTOCONFIG
 #endif
+
+#ifdef ESP_IRAM_ATTR
+#undef ESP_IRAM_ATTR
+#endif
+#define ESP_IRAM_ATTR
 
 #if ESP_PERF
 #define DBG_PERF_PATH_SET(dir, point)
@@ -782,7 +826,7 @@ enum {
 };
 
 #else
-#define DBG_PERF_PATH_SET(dir, point)   
+#define DBG_PERF_PATH_SET(dir, point)
 #define DBG_PERF_FILTER_LEN             1000
 #endif
 
@@ -816,10 +860,20 @@ enum {
 #define LWIP_DHCP_MAX_NTP_SERVERS       CONFIG_LWIP_DHCP_MAX_NTP_SERVERS
 #define LWIP_TIMEVAL_PRIVATE            0
 
+/*
+   --------------------------------------
+   ------------ SNTP options ------------
+   --------------------------------------
+*/
+/*
+ * SNTP update delay - in milliseconds
+ */
+#define SNTP_UPDATE_DELAY              CONFIG_LWIP_SNTP_UPDATE_DELAY
+
 #define SNTP_SET_SYSTEM_TIME_US(sec, us)  \
     do { \
         struct timeval tv = { .tv_sec = sec, .tv_usec = us }; \
-        settimeofday(&tv, NULL); \
+        sntp_sync_time(&tv); \
     } while (0);
 
 #define SNTP_GET_SYSTEM_TIME(sec, us) \
@@ -828,6 +882,7 @@ enum {
         gettimeofday(&tv, NULL); \
         (sec) = tv.tv_sec;  \
         (us) = tv.tv_usec; \
+        sntp_set_sync_status(SNTP_SYNC_STATUS_RESET); \
     } while (0);
 
 #define SOC_SEND_LOG //printf
