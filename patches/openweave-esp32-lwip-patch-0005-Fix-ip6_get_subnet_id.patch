@@ -1,0 +1,36 @@
+From 9fe5cb6e465c4462c9d4c8a9c319cbd2d9988db4 Mon Sep 17 00:00:00 2001
+From: Jay Logue <jaylogue@google.com>
+Date: Thu, 29 Aug 2019 20:17:41 -0700
+Subject: [PATCH] openweave-esp32-lwip-patch-0005 : Fix ip6_get_subnet_id()
+
+This change corresponds to commit 192ac1284fa1b24d8cb9cd770eb8b4ece234fdc1 from tps/lwip:nest/stable
+
+        Author: Abtin Keshavarzian <abtink@nestlabs.com>
+        Date:   Fri Apr 8 09:35:44 2016 -0700
+
+        ip6_addr.h: Fix the ip6_get_subnet_id() marco to return correct
+        subnet id
+
+        This commit changes the macro definition of ip6_get_subnet_id() in
+        ip6_addr.h header file, so it returns the correct subnet id for a
+        given ipv6 address.
+---
+ lwip/src/include/lwip/ip6_addr.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lwip/src/include/lwip/ip6_addr.h b/lwip/src/include/lwip/ip6_addr.h
+index 381b237..5544469 100644
+--- a/lwip/src/include/lwip/ip6_addr.h
++++ b/lwip/src/include/lwip/ip6_addr.h
+@@ -157,7 +157,7 @@ typedef struct ip6_addr ip6_addr_t;
+                                     ((addr1)->addr[2] == (addr2)->addr[2]) && \
+                                     ((addr1)->addr[3] == (addr2)->addr[3]))
+ 
+-#define ip6_get_subnet_id(ip6addr)   (lwip_htonl((ip6addr)->addr[2]) & 0x0000ffffUL)
++#define ip6_get_subnet_id(ip6addr)   (lwip_htonl((ip6addr)->addr[1]) & 0x0000ffffUL)
+ 
+ #define ip6_addr_isany_val(ip6addr) (((ip6addr).addr[0] == 0) && \
+                                      ((ip6addr).addr[1] == 0) && \
+-- 
+2.17.1
+

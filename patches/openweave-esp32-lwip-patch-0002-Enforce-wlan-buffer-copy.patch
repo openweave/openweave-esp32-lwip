@@ -1,0 +1,94 @@
+From e2b1e1e9e62c11caf233bbc238ca6d92300d7895 Mon Sep 17 00:00:00 2001
+From: Jay Logue <jaylogue@google.com>
+Date: Thu, 29 Aug 2019 20:01:48 -0700
+Subject: [PATCH] openweave-esp32-lwip-patch-0002 : Enforce wlan buffer copy
+
+Enforce a copy of inbound buffers received from the wlan (WiFi) interface
+into a PBUF_POOL buffer.
+---
+ Kconfig                       | 18 +-----------------
+ port/esp32/include/lwipopts.h |  4 +++-
+ port/esp32/netif/wlanif.c     | 17 ++++++++++++++++-
+ 3 files changed, 20 insertions(+), 19 deletions(-)
+
+diff --git a/Kconfig b/Kconfig
+index 5862467..caf5649 100644
+--- a/Kconfig
++++ b/Kconfig
+@@ -1,22 +1,6 @@
+ menu "LWIP"
+ 
+-    config L2_TO_L3_COPY
+-        bool "Enable copy between Layer2 and Layer3 packets"
+-        default n
+-        help
+-            If this feature is enabled, all traffic from layer2(WIFI Driver) will be
+-            copied to a new buffer before sending it to layer3(LWIP stack), freeing
+-            the layer2 buffer.
+-            Please be notified that the total layer2 receiving buffer is fixed and
+-            ESP32 currently supports 25 layer2 receiving buffer, when layer2 buffer
+-            runs out of memory, then the incoming packets will be dropped in hardware.
+-            The layer3 buffer is allocated from the heap, so the total layer3 receiving
+-            buffer depends on the available heap size, when heap runs out of memory,
+-            no copy will be sent to layer3 and packet will be dropped in layer2.
+-            Please make sure you fully understand the impact of this feature before
+-            enabling it.
+-
+-    config ETHARP_SUPPORT_VLAN
++   config ETHARP_SUPPORT_VLAN
+         bool "Support receiving and sending ethernet packets with VLAN header"
+         default n
+         help
+diff --git a/port/esp32/include/lwipopts.h b/port/esp32/include/lwipopts.h
+index c3add61..444272d 100644
+--- a/port/esp32/include/lwipopts.h
++++ b/port/esp32/include/lwipopts.h
+@@ -806,7 +806,9 @@
+ #define ESP_PERF                        0
+ #define ESP_IP4_ATON                    1
+ #define ESP_LIGHT_SLEEP                 1
+-#define ESP_L2_TO_L3_COPY               CONFIG_L2_TO_L3_COPY
++#define ESP_L2_TO_L3_COPY               1
++#define ESP_L2_TO_L3_COPY               1
++#define ESP_L2_TO_L3_COPY_BUF_TYPE      PBUF_POOL
+ #define ESP_STATS_MEM                   CONFIG_LWIP_STATS
+ #define ESP_STATS_DROP                  CONFIG_LWIP_STATS
+ #define ESP_STATS_TCP                   0
+diff --git a/port/esp32/netif/wlanif.c b/port/esp32/netif/wlanif.c
+index 7c60b69..fa28d2c 100644
+--- a/port/esp32/netif/wlanif.c
++++ b/port/esp32/netif/wlanif.c
+@@ -35,6 +35,21 @@
+  * Author: Adam Dunkels <adam@sics.se>
+  *
+  */
++/*
++ * Copyright 2018 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
+ 
+ #include "lwip/opt.h"
+ 
+@@ -152,7 +167,7 @@ wlanif_input(struct netif *netif, void *buffer, u16_t len, void* eb)
+   }
+ 
+ #if (ESP_L2_TO_L3_COPY == 1)
+-  p = pbuf_alloc(PBUF_RAW, len, PBUF_RAM);
++  p = pbuf_alloc(PBUF_RAW, len, ESP_L2_TO_L3_COPY_BUF_TYPE);
+   if (p == NULL) {
+     ESP_STATS_DROP_INC(esp.wlanif_input_pbuf_fail);
+     esp_wifi_internal_free_rx_buffer(eb);
+-- 
+2.17.1
+

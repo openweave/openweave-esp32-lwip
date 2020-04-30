@@ -38,30 +38,30 @@ OpenWeave project (https://openweave.io/).  These contributions are Copyright 20
 and published under the Apache 2.0 license.
 
     Kconfig
-    core/ipv6/ethip6.c
-    core/ipv6/ip6.c
-    core/ipv6/ip6_route_table.c
-    core/ipv6/nd6.c
-    core/netif.c
-    core/udp.c
-    include/lwip/lwip/ip6_addr.h
-    include/lwip/lwip/ip6_route_table.h
-    include/lwip/lwip/netif.h
-    include/lwip/lwip/opt.h
-    include/lwip/lwip/priv/tcpip_priv.h
-    include/lwip/lwip/tcpip.h
-    include/lwip/lwip/udp.h
-    include/lwip/port/lwipopts.h
+    lwip/src/core/ipv6/ethip6.c
+    lwip/src/core/ipv6/ip6.c
+    lwip/src/core/ipv6/ip6_route_table.c
+    lwip/src/core/ipv6/nd6.c
+    lwip/src/core/netif.c
+    lwip/src/core/udp.c
+    lwip/src/include/lwip/ip6_addr.h
+    lwip/src/include/lwip/ip6_route_table.h
+    lwip/src/include/lwip/nd6.h
+    lwip/src/include/lwip/netif.h
+    lwip/src/include/lwip/opt.h
+    lwip/src/include/lwip/tcpip.h
+    lwip/src/include/lwip/udp.h
     patches/openweave-esp32-lwip-patch-0001-Add-custom-core-locking.patch
     patches/openweave-esp32-lwip-patch-0002-Enforce-wlan-buffer-copy.patch
-    patches/openweave-esp32-lwip-patch-0003-Removed-include-lwipopts.h.patch
-    patches/openweave-esp32-lwip-patch-0004-Fix-source-IPv6-addr.patch
+    patches/openweave-esp32-lwip-patch-0003-Removed-include-in-lwipopts.h.patch
+    patches/openweave-esp32-lwip-patch-0004-Fix-source-IPv6-address-selection-logic.patch
     patches/openweave-esp32-lwip-patch-0005-Fix-ip6_get_subnet_id.patch
-    patches/openweave-esp32-lwip-patch-0006-Send-neighbor-solicitation.patch
     patches/openweave-esp32-lwip-patch-0007-UDP-interface-binding-support.patch
-    patches/openweave-esp32-lwip-patch-0008-Static-route-table-management.patch
+    patches/openweave-esp32-lwip-patch-0008-Static-route-table-management-in-LwIP..patch
     patches/openweave-esp32-lwip-patch-0009-Enable-custom-pbufs.patch
-    port/netif/wlanif.c
+    patches/openweave-esp32-lwip-patch-0010-Make-nd6_select_router-public.patch
+    port/esp32/include/lwipopts.h
+    port/esp32/netif/wlanif.c
 
 -----
 
